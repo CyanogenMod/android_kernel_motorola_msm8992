@@ -3087,10 +3087,6 @@ static int __wlan_hdd_cfg80211_extscan_get_valid_channels(struct wiphy *wiphy,
        return -EINVAL;
     }
 
-    if (!pHddCtx->cfg_ini->extscan_enabled) {
-        hddLog(LOGE, FL("extscan not supported"));
-        return -ENOTSUPP;
-    }
     if (nla_parse(tb, QCA_WLAN_VENDOR_ATTR_EXTSCAN_SUBCMD_CONFIG_PARAM_MAX,
                   data, data_len,
                   wlan_hdd_extscan_config_policy)) {
@@ -3545,6 +3541,11 @@ static int hdd_extscan_start_fill_bucket_channel_spec(
 		j = 0;
 		nla_for_each_nested(channels,
 			bucket[QCA_WLAN_VENDOR_ATTR_EXTSCAN_CHANNEL_SPEC], rem2) {
+			if ((j >= pReqMsg->buckets[bktIndex].numChannels) ||
+			    hdd_extscan_channel_max_reached(pReqMsg,
+							    total_channels))
+				break;
+
 			if (nla_parse(channel,
 				QCA_WLAN_VENDOR_ATTR_EXTSCAN_SUBCMD_CONFIG_PARAM_MAX,
 				nla_data(channels), nla_len(channels),
@@ -3552,9 +3553,6 @@ static int hdd_extscan_start_fill_bucket_channel_spec(
 				hddLog(LOGE, FL("nla_parse failed"));
 				return -EINVAL;
 			}
-			if (hdd_extscan_channel_max_reached(pReqMsg,
-							    total_channels))
-				break;
 
 			/* Parse and fetch channel */
 			if (!channel[
@@ -3861,6 +3859,10 @@ static int __wlan_hdd_cfg80211_extscan_start(struct wiphy *wiphy,
 			FL("sme_ExtScanStart failed(err=%d)"), status);
 		goto fail;
 	}
+
+	pHddCtx->ext_scan_start_since_boot = vos_get_monotonic_boottime();
+	hddLog(LOG1, FL("Timestamp since boot: %llu"),
+			pHddCtx->ext_scan_start_since_boot);
 
 	/* request was sent -- wait for the response */
 	rc = wait_for_completion_timeout(&context->response_event,
@@ -13728,6 +13730,11 @@ int __wlan_hdd_cfg80211_scan( struct wiphy *wiphy,
            scanRequest.requestType, scanRequest.scanType,
            scanRequest.minChnTime, scanRequest.maxChnTime,
            scanRequest.p2pSearch, scanRequest.skipDfsChnlInP2pSearch);
+#if (LINUX_VERSION_CODE > KERNEL_VERSION(3,7,0))
+    if (request->flags & NL80211_SCAN_FLAG_FLUSH)
+        sme_ScanFlushResult(WLAN_HDD_GET_HAL_CTX(pAdapter),
+                pAdapter->sessionId);
+#endif
 
     vos_runtime_pm_prevent_suspend(pHddCtx->runtime_context.scan);
     status = sme_ScanRequest( WLAN_HDD_GET_HAL_CTX(pAdapter),
@@ -19221,13 +19228,13 @@ wlan_hdd_cfg80211_extscan_cached_results_ind(void *ctx,
 		ap = &result->ap[0];
 		for (j = 0; j < result->num_results; j++) {
 			/*
-			 * Firmware returns timestamp from WiFi turn ON till
-			 * BSSID was cached (in seconds). Add this with
-			 * time gap between system boot up to WiFi turn ON
+			 * Firmware returns timestamp from ext scan start till
+			 * BSSID was cached (in micro seconds). Add this with
+			 * time gap between system boot up to ext scan start
 			 * to derive the time since boot when the
 			 * BSSID was cached.
 			 */
-			ap->ts += pHddCtx->wifi_turn_on_time_since_boot;
+			ap->ts += pHddCtx->ext_scan_start_since_boot;
 			hddLog(LOG1, "Timestamp %llu "
 				"Ssid: %s "
 				"Bssid (" MAC_ADDRESS_STR ") "
