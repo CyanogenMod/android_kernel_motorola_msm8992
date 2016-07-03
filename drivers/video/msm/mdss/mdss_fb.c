@@ -1569,7 +1569,6 @@ static int mdss_fb_blank_blank(struct msm_fb_data_type *mfd,
 {
 	int ret = 0;
 	int cur_power_state;
-	bool cur_panel_dead;
 
 	if (!mfd)
 		return -EINVAL;
@@ -1630,6 +1629,7 @@ static int mdss_fb_blank_unblank(struct msm_fb_data_type *mfd)
 {
 	int ret = 0;
 	int cur_power_state;
+	bool cur_panel_dead;
 
 	if (!mfd)
 		return -EINVAL;
